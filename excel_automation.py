@@ -49,11 +49,10 @@ class ExcelAutomation:
         """Launch Excel application via COM."""
         try:
             pythoncom.CoInitialize()
-            
-            # Use Dispatch instead of DispatchEx.
-            # Dispatch will attach to an already running Excel instance if one exists,
-            # which ensures the add-in is loaded if the user has Excel open.
-            self.excel_app = win32.Dispatch("Excel.Application")
+            # Use DispatchEx to guarantee a fresh, dedicated Excel instance.
+            # Dispatch sometimes attaches to hidden background zombie processes
+            # which do not have the proper add-ins loaded.
+            self.excel_app = win32.DispatchEx("Excel.Application")
             self.excel_app.Visible = True           # Must be visible for ribbon clicks
             self.excel_app.DisplayAlerts = False     # Suppress dialogs
             self.excel_app.AskToUpdateLinks = False  # Don't prompt for links
