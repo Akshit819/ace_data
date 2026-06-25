@@ -1,0 +1,14 @@
+# Credentials
+.env
+
+# Output files
+output/
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
