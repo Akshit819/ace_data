@@ -49,34 +49,31 @@ class ExcelAutomation:
         """Launch Excel application via COM."""
         try:
             pythoncom.CoInitialize()
-            # Use DispatchEx to guarantee a fresh, dedicated Excel instance.
-            # Dispatch sometimes attaches to hidden background zombie processes
-            # which do not have the proper add-ins loaded.
-            self.excel_app = win32.DispatchEx("Excel.Application")
+            
+            # To guarantee all add-ins and extensions (especially XLLs) load properly,
+            # we must NOT start Excel directly in "Automation Mode".
+            # Instead, we check if it's already open. If not, we launch it like a normal user.
+            import subprocess
+            try:
+                # Try to attach to an already-running instance
+                self.excel_app = win32.GetActiveObject("Excel.Application")
+                self.logger.info("Attached to an already open Excel instance.")
+            except Exception:
+                self.logger.info("Launching Excel interactively to ensure extensions load...")
+                # Start Excel as a normal desktop app (Windows only)
+                subprocess.Popen(["start", "excel.exe"], shell=True)
+                
+                # Wait for Excel to fully load its splash screen and add-ins
+                time.sleep(7)
+                
+                # Now attach to the instance we just opened
+                self.excel_app = win32.Dispatch("Excel.Application")
+
             self.excel_app.Visible = True           # Must be visible for ribbon clicks
             self.excel_app.DisplayAlerts = False     # Suppress dialogs
             self.excel_app.AskToUpdateLinks = False  # Don't prompt for links
-            
-            # CRITICAL: When launched via COM, Excel often does not load Add-ins.
-            # We must explicitly force-connect COM add-ins.
-            try:
-                for addin in self.excel_app.COMAddIns:
-                    # If it's not connected, force connect it
-                    if not addin.Connect:
-                        addin.Connect = True
-                        self.logger.debug(f"Force-connected COM Add-in: {addin.Description}")
-            except Exception as e:
-                self.logger.debug(f"Could not iterate COMAddIns: {e}")
 
-            # Also ensure standard add-ins (like .xla / .xlam) are installed
-            try:
-                for addin in self.excel_app.AddIns:
-                    if not addin.Installed:
-                        addin.Installed = True
-            except Exception:
-                pass
-
-            self.logger.info("Excel application started successfully (Visible=True, Add-ins forced).")
+            self.logger.info("Excel application ready.")
         except Exception as e:
             self.logger.error(f"Failed to start Excel: {e}")
             raise
