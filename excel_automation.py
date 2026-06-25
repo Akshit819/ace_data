@@ -254,17 +254,22 @@ class ExcelAutomation:
         on the ACEEQ XL NXT ribbon tab.
         """
         try:
-            from pywinauto import Application, findwindows
+            from pywinauto import Application
 
             self.logger.debug(f"[{company_name}] Trying pywinauto ribbon click...")
 
-            # Connect to the running Excel instance
-            app = Application(backend="uia").connect(class_name="XLMAIN")
-            excel_window = app.window(class_name="XLMAIN")
+            # Connect to the specific Excel instance using its Window Handle (HWND)
+            # This prevents errors if multiple Excel windows are open.
+            hwnd = self.excel_app.Hwnd
+            app = Application(backend="uia").connect(handle=hwnd)
+            excel_window = app.window(handle=hwnd)
 
             # Ensure window is in focus
             if excel_window.exists():
-                excel_window.set_focus()
+                try:
+                    excel_window.set_focus()
+                except Exception:
+                    pass
                 time.sleep(0.5)
 
             # Find the ACEEQ XL NXT ribbon tab and click it

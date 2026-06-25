@@ -146,6 +146,16 @@ def main():
                 f"EXCEL_FAIL | {company_name} | {accord_code} | {e}"
             )
             results["excel_fail"] += 1
+            
+            # If the COM server disconnected/crashed, restart Excel to save the rest of the batch
+            main_logger.warning("Attempting to restart Excel to recover from failure...")
+            excel.quit_excel()
+            try:
+                excel.start_excel()
+            except Exception as restart_e:
+                main_logger.critical(f"Fatal error restarting Excel: {restart_e}")
+                sys.exit(1)
+                
             continue  # Skip to next company
 
         # Step 2: Upload (disabled — testing Excel only)
