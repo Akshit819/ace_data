@@ -29,6 +29,7 @@ import win32com.client as win32
 from config import (
     TEMPLATE_FILE_PATH,
     OUTPUT_FOLDER_PATH,
+    ACCORD_CODE_SHEET,
     ACCORD_CODE_CELL,
     REFRESH_WAIT_SECONDS,
     EXCEL_MAX_RETRIES,
@@ -134,9 +135,16 @@ class ExcelAutomation:
                 f"[{company_name}] Workbook opened. Writing Accord Code '{accord_code}' to {ACCORD_CODE_CELL}."
             )
 
-            # Write Accord Code to the designated cell on the Active Sheet
-            # Using ActiveSheet is safer than Sheets(1) in case the yellow cell is on sheet 2 or 3
-            sheet = workbook.ActiveSheet
+            # Write Accord Code to the designated sheet and cell
+            try:
+                sheet = workbook.Sheets(ACCORD_CODE_SHEET)
+            except Exception:
+                self.logger.warning(
+                    f"[{company_name}] Sheet '{ACCORD_CODE_SHEET}' not found! "
+                    "Falling back to ActiveSheet."
+                )
+                sheet = workbook.ActiveSheet
+
             sheet.Range(ACCORD_CODE_CELL).Value = int(accord_code)
             self.logger.debug(f"[{company_name}] Accord Code written to {sheet.Name}!{ACCORD_CODE_CELL}.")
 

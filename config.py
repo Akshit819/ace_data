@@ -50,6 +50,7 @@ TEMPLATE_FILE_PATH = _resolve_path("TEMPLATE_FILE_PATH")
 OUTPUT_FOLDER_PATH = _resolve_path("OUTPUT_FOLDER_PATH")
 
 # ── Excel Settings ───────────────────────────────────
+ACCORD_CODE_SHEET = _get("ACCORD_CODE_SHEET", "Annual Raw")
 ACCORD_CODE_CELL = _get("ACCORD_CODE_CELL", "A1")
 REFRESH_WAIT_SECONDS = _get_int("REFRESH_WAIT_SECONDS", 30)
 EXCEL_MAX_RETRIES = _get_int("EXCEL_MAX_RETRIES", 3)
