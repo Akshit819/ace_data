@@ -2,9 +2,21 @@
 Excel COM Automation — controls Microsoft Excel via pywin32 to:
   1. Open the template workbook
   2. Write Accord Code to a cell
-  3. Trigger RefreshAll (for AccEquity XL NXT add-in)
+  3. Trigger the ACEEQ XL NXT add-in's "Refresh All Sheets" ribbon button
   4. Wait for data population
   5. Save as a new file
+
+The ACEEQ XL NXT add-in has its own ribbon tab with:
+  - Settings, Import Data, Template Builder, Single Function
+  - Company Search, Check Compatibility
+  - "Refresh All Sheets" ← THIS is what we need to click
+  - "Refresh"
+
+Since these are custom add-in buttons (not standard Excel data connections),
+workbook.RefreshAll() alone will NOT trigger them. We use multiple strategies:
+  1. pywinauto UI automation to find & click the ribbon button
+  2. Application.Run() to invoke the add-in's macros directly
+  3. SendKeys as a fallback
 """
 
 import os
@@ -37,10 +49,10 @@ class ExcelAutomation:
         try:
             pythoncom.CoInitialize()
             self.excel_app = win32.DispatchEx("Excel.Application")
-            self.excel_app.Visible = False          # Run headless
-            self.excel_app.DisplayAlerts = False    # Suppress dialogs
-            self.excel_app.AskToUpdateLinks = False # Don't prompt for links
-            self.logger.info("Excel application started successfully.")
+            self.excel_app.Visible = True           # Must be visible for ribbon clicks
+            self.excel_app.DisplayAlerts = False     # Suppress dialogs
+            self.excel_app.AskToUpdateLinks = False  # Don't prompt for links
+            self.logger.info("Excel application started successfully (Visible=True for add-in).")
         except Exception as e:
             self.logger.error(f"Failed to start Excel: {e}")
             raise
@@ -70,9 +82,9 @@ class ExcelAutomation:
           1. Copy template → working file
           2. Open working file in Excel
           3. Write accord_code to ACCORD_CODE_CELL
-          4. RefreshAll + wait
+          4. Trigger ACEEQ XL NXT refresh + wait
           5. Save as <Company Name>.xlsx
-          
+
         Returns the path to the saved output file.
         Raises on unrecoverable failure.
         """
@@ -81,7 +93,7 @@ class ExcelAutomation:
         # Sanitize company name for filename
         safe_name = self._sanitize_filename(company_name)
         output_path = os.path.join(OUTPUT_FOLDER_PATH, f"{safe_name}.xlsx")
-        
+
         # Create a temporary working copy of the template
         working_copy = os.path.join(OUTPUT_FOLDER_PATH, f"_working_{safe_name}.xlsx")
         shutil.copy2(TEMPLATE_FILE_PATH, working_copy)
@@ -103,7 +115,7 @@ class ExcelAutomation:
             sheet.Range(ACCORD_CODE_CELL).Value = int(accord_code)
             self.logger.debug(f"[{company_name}] Accord Code written.")
 
-            # Refresh with retries
+            # Trigger ACEEQ XL NXT refresh with retries
             self._refresh_with_retry(workbook, company_name)
 
             # Save as output file
@@ -136,99 +148,59 @@ class ExcelAutomation:
 
     # ── Refresh Logic ────────────────────────────────
     #
-    # AccEquity XL NXT is an Excel add-in, NOT a standard data connection.
-    # workbook.RefreshAll() alone only refreshes ODBC/Power Query/Web queries.
-    # Add-ins typically use one (or more) of these mechanisms:
+    # The ACEEQ XL NXT add-in has its OWN "Refresh All Sheets" button
+    # on its custom ribbon tab. Standard workbook.RefreshAll() does NOT
+    # trigger it. We use multiple strategies in order of reliability:
     #
-    #   1. RTD (Real-Time Data) server  → needs RTD throttle reset
-    #   2. Custom UDF worksheet functions → needs CalculateFullRebuild
-    #   3. Ribbon "Refresh" button hook  → needs SendKeys Ctrl+Alt+F5
-    #   4. COM Add-in with its own macro → needs Application.Run (if known)
-    #
-    # We fire ALL strategies so that whichever mechanism the add-in uses,
-    # it gets triggered.
+    #   1. pywinauto → find & click the actual ribbon button
+    #   2. Application.Run → call the add-in's VBA macro directly
+    #   3. SendKeys → keyboard-navigate the ribbon tab
+    #   4. RefreshAll + CalculateFullRebuild → standard fallbacks
 
     def _refresh_with_retry(self, workbook, company_name: str) -> None:
         """
-        Multi-strategy refresh to ensure the AccEquity XL NXT add-in
-        recalculates all data. Retries on failure.
+        Multi-strategy refresh targeting the ACEEQ XL NXT add-in.
+        Retries up to EXCEL_MAX_RETRIES times.
         """
         for attempt in range(1, EXCEL_MAX_RETRIES + 1):
             try:
                 self.logger.info(
-                    f"[{company_name}] Refreshing all data (attempt {attempt}/{EXCEL_MAX_RETRIES})..."
+                    f"[{company_name}] Triggering ACEEQ XL NXT refresh "
+                    f"(attempt {attempt}/{EXCEL_MAX_RETRIES})..."
                 )
 
-                # ── Strategy 1: Reset RTD Throttle ───────────────
-                # If the add-in uses an RTD server, resetting the throttle
-                # interval forces Excel to re-query the server immediately
-                # instead of waiting for the next polling cycle.
-                try:
-                    original_throttle = self.excel_app.RTD.ThrottleInterval
-                    self.excel_app.RTD.ThrottleInterval = 0
-                    self.logger.debug(
-                        f"[{company_name}] RTD throttle reset (was {original_throttle}ms → 0ms)."
-                    )
-                except Exception:
-                    self.logger.debug(f"[{company_name}] RTD throttle reset not applicable.")
+                refresh_triggered = False
 
-                # ── Strategy 2: CalculateFullRebuild ─────────────
-                # Forces Excel to rebuild the dependency tree and recalculate
-                # ALL formulas, including custom UDF functions from add-ins.
-                # This is stronger than Calculate() or CalculateFull().
-                try:
-                    self.excel_app.CalculateFullRebuild()
-                    self.logger.debug(f"[{company_name}] CalculateFullRebuild triggered.")
-                except Exception as e:
-                    self.logger.debug(f"[{company_name}] CalculateFullRebuild skipped: {e}")
+                # ── Strategy 1: pywinauto — click the ribbon button ──
+                refresh_triggered = self._try_pywinauto_refresh(company_name)
 
-                # ── Strategy 3: RefreshAll ───────────────────────
-                # Standard refresh for data connections, pivot tables,
-                # and any query tables. Some add-ins also hook into this.
-                workbook.RefreshAll()
-                self.logger.debug(f"[{company_name}] RefreshAll triggered.")
+                # ── Strategy 2: Application.Run — call add-in macro ──
+                if not refresh_triggered:
+                    refresh_triggered = self._try_application_run(company_name)
 
-                # ── Strategy 4: SendKeys Ctrl+Alt+F5 ─────────────
-                # Simulates pressing the keyboard shortcut for
-                # "Refresh All" in the Data ribbon tab. Many add-ins
-                # intercept this event even if they ignore RefreshAll().
-                # SendKeys requires the Excel window to exist (it can
-                # be minimized but must be Visible=True briefly).
-                try:
-                    self.excel_app.Visible = True
-                    time.sleep(1)  # Let window render
-                    self.excel_app.SendKeys("^%{F5}", Wait=True)  # Ctrl+Alt+F5
-                    self.logger.debug(f"[{company_name}] SendKeys Ctrl+Alt+F5 sent.")
-                    self.excel_app.Visible = False
-                except Exception as e:
-                    self.logger.debug(f"[{company_name}] SendKeys skipped: {e}")
-                    try:
-                        self.excel_app.Visible = False
-                    except Exception:
-                        pass
+                # ── Strategy 3: SendKeys — keyboard-navigate ribbon ──
+                if not refresh_triggered:
+                    refresh_triggered = self._try_sendkeys_refresh(company_name)
 
-                # ── Wait for add-in data ─────────────────────────
+                # ── Strategy 4: Standard fallbacks ───────────────────
+                # Always fire these as supplementary triggers
+                self._standard_refresh(workbook, company_name)
+
+                # ── Wait for data ────────────────────────────────────
                 self.logger.info(
-                    f"[{company_name}] Waiting {REFRESH_WAIT_SECONDS}s for AccEquity XL NXT data..."
+                    f"[{company_name}] Waiting {REFRESH_WAIT_SECONDS}s for "
+                    f"ACEEQ XL NXT to populate data..."
                 )
                 time.sleep(REFRESH_WAIT_SECONDS)
 
-                # ── Smart async wait ─────────────────────────────
-                # CalculateUntilAsyncQueriesDone blocks until all async
-                # operations complete (available in Excel 2010+).
+                # Smart async wait
                 try:
                     self.excel_app.CalculateUntilAsyncQueriesDone()
                     self.logger.debug(f"[{company_name}] Async queries done.")
                 except Exception:
                     pass
 
-                # ── Restore RTD throttle ─────────────────────────
-                try:
-                    self.excel_app.RTD.ThrottleInterval = original_throttle
-                except Exception:
-                    pass
-
-                self.logger.info(f"[{company_name}] Refresh completed (all strategies fired).")
+                self.logger.info(f"[{company_name}] Refresh completed.")
                 return  # Success
 
             except Exception as e:
@@ -240,6 +212,179 @@ class ExcelAutomation:
                         f"Refresh failed after {EXCEL_MAX_RETRIES} attempts"
                     ) from e
                 time.sleep(5)
+
+    # ── Strategy 1: pywinauto (most reliable) ────────
+
+    def _try_pywinauto_refresh(self, company_name: str) -> bool:
+        """
+        Use pywinauto to find and click the 'Refresh All Sheets' button
+        on the ACEEQ XL NXT ribbon tab.
+        """
+        try:
+            from pywinauto import Application, findwindows
+
+            self.logger.debug(f"[{company_name}] Trying pywinauto ribbon click...")
+
+            # Connect to the running Excel instance
+            app = Application(backend="uia").connect(class_name="XLMAIN")
+            excel_window = app.window(class_name="XLMAIN")
+
+            # Ensure window is in focus
+            if excel_window.exists():
+                excel_window.set_focus()
+                time.sleep(0.5)
+
+            # Find the ACEEQ XL NXT ribbon tab and click it
+            try:
+                aceeq_tab = excel_window.child_window(title="ACEEQ XL NXT", control_type="TabItem")
+                aceeq_tab.click_input()
+                time.sleep(0.5)
+                self.logger.debug(f"[{company_name}] Clicked ACEEQ XL NXT tab.")
+            except Exception as e:
+                self.logger.debug(f"[{company_name}] Could not find ACEEQ XL NXT tab: {e}")
+                # Try alternate name patterns
+                try:
+                    aceeq_tab = excel_window.child_window(title_re=".*ACEEQ.*|.*AccEquity.*", control_type="TabItem")
+                    aceeq_tab.click_input()
+                    time.sleep(0.5)
+                    self.logger.debug(f"[{company_name}] Clicked ACEEQ tab (via regex).")
+                except Exception:
+                    self.logger.debug(f"[{company_name}] ACEEQ tab not found via regex either.")
+                    return False
+
+            # Find and click "Refresh All Sheets" button
+            try:
+                refresh_btn = excel_window.child_window(
+                    title="Refresh All Sheets", control_type="Button"
+                )
+                refresh_btn.click_input()
+                self.logger.info(f"[{company_name}] ✓ Clicked 'Refresh All Sheets' via pywinauto.")
+                return True
+            except Exception:
+                pass
+
+            # Fallback: try just "Refresh All Sheets" as a menu item or other control
+            try:
+                refresh_btn = excel_window.child_window(title_re=".*Refresh All Sheets.*")
+                refresh_btn.click_input()
+                self.logger.info(f"[{company_name}] ✓ Clicked 'Refresh All Sheets' (fallback match).")
+                return True
+            except Exception:
+                pass
+
+            # Last resort: try the "Refresh" button
+            try:
+                refresh_btn = excel_window.child_window(
+                    title="Refresh", control_type="Button"
+                )
+                refresh_btn.click_input()
+                self.logger.info(f"[{company_name}] ✓ Clicked 'Refresh' button via pywinauto.")
+                return True
+            except Exception as e:
+                self.logger.debug(f"[{company_name}] pywinauto could not find refresh button: {e}")
+                return False
+
+        except ImportError:
+            self.logger.warning("pywinauto not installed. Skipping Strategy 1.")
+            return False
+        except Exception as e:
+            self.logger.debug(f"[{company_name}] pywinauto strategy failed: {e}")
+            return False
+
+    # ── Strategy 2: Application.Run (if macro is registered) ──
+
+    def _try_application_run(self, company_name: str) -> bool:
+        """
+        Try calling the add-in's refresh macro directly.
+        The exact macro name depends on how ACEEQ XL NXT registers itself.
+        We try several common patterns.
+        """
+        # Common macro name patterns for Excel add-ins
+        macro_names = [
+            "RefreshAllSheets",
+            "ACEEQXLNXT.RefreshAllSheets",
+            "AceeqXLNXT.RefreshAllSheets",
+            "AccEquity.RefreshAllSheets",
+            "RefreshAll",
+            "ACEEQXLNXT.RefreshAll",
+            "AceeqXLNXT.Refresh",
+            "ACEEQ.Refresh",
+        ]
+
+        for macro in macro_names:
+            try:
+                self.excel_app.Run(macro)
+                self.logger.info(
+                    f"[{company_name}] ✓ Application.Run('{macro}') succeeded."
+                )
+                return True
+            except Exception:
+                continue
+
+        self.logger.debug(f"[{company_name}] No Application.Run macro worked.")
+        return False
+
+    # ── Strategy 3: SendKeys ribbon navigation ───────
+
+    def _try_sendkeys_refresh(self, company_name: str) -> bool:
+        """
+        Use keyboard shortcuts to navigate to the ACEEQ XL NXT tab
+        and trigger Refresh All Sheets.
+
+        Alt → activates ribbon keytips → navigate to add-in tab → click button.
+        """
+        try:
+            self.logger.debug(f"[{company_name}] Trying SendKeys ribbon navigation...")
+
+            # Press Alt to show keytips, then Escape to reset state
+            self.excel_app.SendKeys("%", Wait=True)   # Alt — activate ribbon
+            time.sleep(0.5)
+            self.excel_app.SendKeys("{ESC}", Wait=True)
+            time.sleep(0.3)
+
+            # Try Ctrl+Alt+F5 (standard Excel "Refresh All" shortcut)
+            # Some add-ins hook into this
+            self.excel_app.SendKeys("^%{F5}", Wait=True)
+            time.sleep(0.5)
+
+            self.logger.info(f"[{company_name}] ✓ SendKeys Ctrl+Alt+F5 sent.")
+            return True
+
+        except Exception as e:
+            self.logger.debug(f"[{company_name}] SendKeys strategy failed: {e}")
+            return False
+
+    # ── Strategy 4: Standard Excel fallbacks ─────────
+
+    def _standard_refresh(self, workbook, company_name: str) -> None:
+        """
+        Fire standard Excel refresh mechanisms as supplementary triggers.
+        These won't trigger the ACEEQ add-in directly but help with
+        any standard data connections the template may also contain.
+        """
+        # RTD throttle reset
+        try:
+            original_throttle = self.excel_app.RTD.ThrottleInterval
+            self.excel_app.RTD.ThrottleInterval = 0
+            time.sleep(0.5)
+            self.excel_app.RTD.ThrottleInterval = original_throttle
+            self.logger.debug(f"[{company_name}] RTD throttle cycled.")
+        except Exception:
+            pass
+
+        # CalculateFullRebuild — forces recalculation of all formulas
+        try:
+            self.excel_app.CalculateFullRebuild()
+            self.logger.debug(f"[{company_name}] CalculateFullRebuild triggered.")
+        except Exception:
+            pass
+
+        # Standard RefreshAll
+        try:
+            workbook.RefreshAll()
+            self.logger.debug(f"[{company_name}] RefreshAll triggered.")
+        except Exception:
+            pass
 
     # ── Helpers ──────────────────────────────────────
 
