@@ -55,6 +55,10 @@ class APIClient:
                 or data.get("auth_token")
                 or data.get("data", {}).get("token")
             )
+            
+            # Extract uploader info for the foreign key constraint
+            user_data = data.get("user") or data.get("data", {}).get("user") or data
+            self.uploader_name = str(user_data.get("id") or user_data.get("user_id") or user_data.get("name") or API_USERNAME)
 
             if not self.token:
                 raise ValueError(
@@ -110,9 +114,9 @@ class APIClient:
                         files={"file": (filename, f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
                         data={
                             "company_name": company_name,
-                            "accord_code": accord_code,
-                        },
-                        timeout=120,
+                            "uploader_name": getattr(self, 'uploader_name', API_USERNAME),
+                            "upload_type": 0,
+                        },timeout=120,
                     )
 
                 # Handle token expiration (401/403) → re-auth and retry
@@ -132,13 +136,21 @@ class APIClient:
                 )
                 return result
 
-            except requests.exceptions.RequestException as e:
+            except requests.exceptions.HTTPError as e:
                 self.logger.warning(
                     f"[{company_name}] Upload attempt {attempt} failed: {e}"
                 )
-                self.error_logger.warning(
-                    f"[{company_name}] Upload attempt {attempt} failed: {e}"
-                )
+                if e.response is not None:
+                    self.logger.warning(f"Response body: {e.response.text}")
+                
+                if attempt == UPLOAD_MAX_RETRIES:
+                    raise RuntimeError(
+                        f"Upload failed for '{company_name}' after {UPLOAD_MAX_RETRIES} attempts"
+                    ) from e
+                
+                time.sleep(UPLOAD_RETRY_DELAY)
+            
+            except requests.exceptions.RequestException as e:
 
                 if attempt == UPLOAD_MAX_RETRIES:
                     raise RuntimeError(
@@ -182,9 +194,23 @@ if __name__ == "__main__":
         # 4. Test Login
         client.login()
         print("\n✅ LOGIN SUCCESS!")
-        print(f"Received Token: {client.token}")
+        
+        # 5. Test Upload
+        import os
+        test_file = os.path.join("output", "Muthoot Finance Ltd.xlsx")
+        
+        if not os.path.exists(test_file):
+            print(f"\n⚠️ Test file not found at {test_file}")
+            sys.exit(1)
+            
+        print(f"\nTesting upload with: {test_file}")
+        # The accord_code doesn't matter for the upload request as it only sends company_name
+        result = client.upload_file(test_file, company_name="Muthoot Finance Ltd", accord_code="221790")
+        print("\n✅ UPLOAD SUCCESS!")
+        print(result)
+
     except Exception as e:
-        print(f"\n❌ LOGIN FAILED: {e}")
+        print(f"\n❌ FAILED: {e}")
         sys.exit(1)
     finally:
         client.close()
