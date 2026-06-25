@@ -23,20 +23,31 @@ def load_companies(csv_path: str, logger) -> pd.DataFrame:
 
     df = pd.read_csv(csv_path)
 
-    # Normalize column names (strip whitespace)
-    df.columns = df.columns.str.strip()
+    # Normalize column names: strip whitespace and convert to title case
+    # so "Company name" and "Company Name" both become "Company Name"
+    df.columns = df.columns.str.strip().str.title()
 
     required_cols = {"Accord Code", "Company Name"}
     missing = required_cols - set(df.columns)
     if missing:
         raise ValueError(f"CSV is missing required columns: {missing}")
 
-    # Drop rows with missing values in required columns
+    # Drop rows with missing Accord Code (Company Name can have blanks for Rights etc.)
     initial_count = len(df)
     df = df.dropna(subset=["Accord Code", "Company Name"])
     dropped = initial_count - len(df)
     if dropped:
         logger.warning(f"Dropped {dropped} rows with missing Accord Code or Company Name.")
+
+    # Filter out Rights Entitlements and Partly Paid-up entries
+    mask = df["Company Name"].str.contains(
+        r"Rights Entitlements|Partly Paid-up|Amalgamated|Merged",
+        case=False, na=False
+    )
+    filtered = mask.sum()
+    if filtered:
+        df = df[~mask]
+        logger.info(f"Filtered out {filtered} Rights/Partly-Paid/Amalgamated entries.")
 
     # Convert Accord Code to string (for consistent handling)
     df["Accord Code"] = df["Accord Code"].astype(int).astype(str)

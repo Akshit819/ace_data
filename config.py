@@ -23,6 +23,20 @@ def _get_int(key: str, default: int = 0) -> int:
     except ValueError:
         return default
 
+# Project root = directory containing this script
+_PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def _resolve_path(key: str, default: str = "") -> str:
+    """Get a path from env and resolve it relative to project root."""
+    raw = _get(key, default)
+    if not raw:
+        return raw
+    p = Path(raw)
+    if p.is_absolute():
+        return str(p)
+    return str(_PROJECT_ROOT / p)
+
 
 # ── API ──────────────────────────────────────────────
 API_LOGIN_URL = _get("API_LOGIN_URL")
@@ -30,10 +44,10 @@ API_UPLOAD_URL = _get("API_UPLOAD_URL")
 API_USERNAME = _get("API_USERNAME")
 API_PASSWORD = _get("API_PASSWORD")
 
-# ── File Paths ───────────────────────────────────────
-CSV_FILE_PATH = _get("CSV_FILE_PATH")
-TEMPLATE_FILE_PATH = _get("TEMPLATE_FILE_PATH")
-OUTPUT_FOLDER_PATH = _get("OUTPUT_FOLDER_PATH")
+# ── File Paths (resolved relative to project root) ──
+CSV_FILE_PATH = _resolve_path("CSV_FILE_PATH")
+TEMPLATE_FILE_PATH = _resolve_path("TEMPLATE_FILE_PATH")
+OUTPUT_FOLDER_PATH = _resolve_path("OUTPUT_FOLDER_PATH")
 
 # ── Excel Settings ───────────────────────────────────
 ACCORD_CODE_CELL = _get("ACCORD_CODE_CELL", "A1")
@@ -45,5 +59,5 @@ UPLOAD_MAX_RETRIES = _get_int("UPLOAD_MAX_RETRIES", 3)
 UPLOAD_RETRY_DELAY = _get_int("UPLOAD_RETRY_DELAY", 5)
 
 # ── Logging ──────────────────────────────────────────
-LOG_FILE_PATH = _get("LOG_FILE_PATH", "automation.log")
-ERROR_LOG_FILE_PATH = _get("ERROR_LOG_FILE_PATH", "errors.log")
+LOG_FILE_PATH = _resolve_path("LOG_FILE_PATH", "automation.log")
+ERROR_LOG_FILE_PATH = _resolve_path("ERROR_LOG_FILE_PATH", "errors.log")
