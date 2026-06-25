@@ -48,11 +48,35 @@ class ExcelAutomation:
         """Launch Excel application via COM."""
         try:
             pythoncom.CoInitialize()
-            self.excel_app = win32.DispatchEx("Excel.Application")
+            
+            # Use Dispatch instead of DispatchEx.
+            # Dispatch will attach to an already running Excel instance if one exists,
+            # which ensures the add-in is loaded if the user has Excel open.
+            self.excel_app = win32.Dispatch("Excel.Application")
             self.excel_app.Visible = True           # Must be visible for ribbon clicks
             self.excel_app.DisplayAlerts = False     # Suppress dialogs
             self.excel_app.AskToUpdateLinks = False  # Don't prompt for links
-            self.logger.info("Excel application started successfully (Visible=True for add-in).")
+            
+            # CRITICAL: When launched via COM, Excel often does not load Add-ins.
+            # We must explicitly force-connect COM add-ins.
+            try:
+                for addin in self.excel_app.COMAddIns:
+                    # If it's not connected, force connect it
+                    if not addin.Connect:
+                        addin.Connect = True
+                        self.logger.debug(f"Force-connected COM Add-in: {addin.Description}")
+            except Exception as e:
+                self.logger.debug(f"Could not iterate COMAddIns: {e}")
+
+            # Also ensure standard add-ins (like .xla / .xlam) are installed
+            try:
+                for addin in self.excel_app.AddIns:
+                    if not addin.Installed:
+                        addin.Installed = True
+            except Exception:
+                pass
+
+            self.logger.info("Excel application started successfully (Visible=True, Add-ins forced).")
         except Exception as e:
             self.logger.error(f"Failed to start Excel: {e}")
             raise
@@ -110,10 +134,11 @@ class ExcelAutomation:
                 f"[{company_name}] Workbook opened. Writing Accord Code '{accord_code}' to {ACCORD_CODE_CELL}."
             )
 
-            # Write Accord Code to the designated cell
-            sheet = workbook.Sheets(1)
+            # Write Accord Code to the designated cell on the Active Sheet
+            # Using ActiveSheet is safer than Sheets(1) in case the yellow cell is on sheet 2 or 3
+            sheet = workbook.ActiveSheet
             sheet.Range(ACCORD_CODE_CELL).Value = int(accord_code)
-            self.logger.debug(f"[{company_name}] Accord Code written.")
+            self.logger.debug(f"[{company_name}] Accord Code written to {sheet.Name}!{ACCORD_CODE_CELL}.")
 
             # Trigger ACEEQ XL NXT refresh with retries
             self._refresh_with_retry(workbook, company_name)
