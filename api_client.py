@@ -35,10 +35,11 @@ class APIClient:
         """
         self.logger.info(f"Authenticating with API at {API_LOGIN_URL}...")
         try:
+            # The API expects JSON after all
             response = self.session.post(
                 API_LOGIN_URL,
                 json={
-                    "username": API_USERNAME,
+                    "email": API_USERNAME,
                     "password": API_PASSWORD,
                 },
                 timeout=30,
@@ -65,8 +66,13 @@ class APIClient:
             })
             self.logger.info("Authentication successful. Token acquired.")
 
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.HTTPError as e:
             self.logger.error(f"Authentication failed: {e}")
+            if e.response is not None:
+                self.logger.error(f"Response body: {e.response.text}")
+            raise
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Request failed: {e}")
             raise
         except (ValueError, KeyError) as e:
             self.logger.error(f"Failed to parse auth response: {e}")
@@ -153,3 +159,32 @@ class APIClient:
         """Close the HTTP session."""
         self.session.close()
         self.logger.debug("HTTP session closed.")
+
+
+if __name__ == "__main__":
+    from logger_setup import setup_logger
+    import sys
+
+    # 1. Setup logs (we only care about the console output for this test)
+    main_logger, error_logger = setup_logger()
+    
+    # 2. Print what we're doing
+    print("="*50)
+    print("TESTING API LOGIN INDEPENDENTLY")
+    print(f"Target URL: {API_LOGIN_URL}")
+    print(f"Username configured: {API_USERNAME}")
+    print("="*50)
+
+    # 3. Create client
+    client = APIClient(main_logger, error_logger)
+    
+    try:
+        # 4. Test Login
+        client.login()
+        print("\n✅ LOGIN SUCCESS!")
+        print(f"Received Token: {client.token}")
+    except Exception as e:
+        print(f"\n❌ LOGIN FAILED: {e}")
+        sys.exit(1)
+    finally:
+        client.close()
