@@ -27,7 +27,7 @@ def _get_int(key: str, default: int = 0) -> int:
 # ── API ──────────────────────────────────────────────
 API_LOGIN_URL = _get("API_LOGIN_URL")
 API_UPLOAD_URL = _get("API_UPLOAD_URL")
-API_USER_ID = _get("API_USER_ID")
+API_USERNAME = _get("API_USERNAME")
 API_PASSWORD = _get("API_PASSWORD")
 
 # ── File Paths ───────────────────────────────────────
