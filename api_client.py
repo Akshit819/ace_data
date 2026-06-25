@@ -1,5 +1,18 @@
 """
 API Client — handles authentication and file upload to tickercharcha.com.
+
+Upload endpoint: POST /tickertest/upload-files
+Form fields:
+    - company_name  (str, required)
+    - uploader_name (str, default "-")
+    - file          (UploadFile, required)
+    - upload_type   (int, default 0)
+        0 = Excel upload (what we use)
+        1 = Annual consensus
+        2 = BB Q4
+        3 = Report upload
+
+Auth: Bearer token via get_current_user dependency.
 """
 
 import os
@@ -18,7 +31,7 @@ from config import (
 
 
 class APIClient:
-    """Manages authentication and file uploads."""
+    """Manages authentication and file uploads to tickercharcha.com."""
 
     def __init__(self, logger: logging.Logger, error_logger: logging.Logger):
         self.logger = logger
@@ -30,7 +43,7 @@ class APIClient:
 
     def login(self) -> None:
         """
-        Authenticate with the API and store the token.
+        Authenticate with the API and store the Bearer token.
         Raises on failure.
         """
         self.logger.info(f"Authenticating with API at {API_LOGIN_URL}...")
@@ -47,7 +60,7 @@ class APIClient:
 
             data = response.json()
 
-            # Try common token field names
+            # Try common token field names from the response
             self.token = (
                 data.get("token")
                 or data.get("access_token")
@@ -57,7 +70,9 @@ class APIClient:
 
             if not self.token:
                 raise ValueError(
-                    f"Token not found in login response. Keys: {list(data.keys())}"
+                    f"Token not found in login response. "
+                    f"Response keys: {list(data.keys())}. "
+                    f"Full response: {data}"
                 )
 
             self.session.headers.update({
@@ -83,8 +98,15 @@ class APIClient:
         self, file_path: str, company_name: str, accord_code: str
     ) -> dict:
         """
-        Upload a generated Excel file to the API.
-        
+        Upload a generated Excel file to tickercharcha.com.
+
+        Endpoint: POST /tickertest/upload-files
+        Form data:
+            - company_name:  company name from ace.csv
+            - uploader_name: identifier for who uploaded (default: "ace_automation")
+            - file:          the .xlsx file
+            - upload_type:   0 (Excel upload)
+
         Returns the API response as a dict.
         Raises on unrecoverable failure.
         """
@@ -95,16 +117,24 @@ class APIClient:
         for attempt in range(1, UPLOAD_MAX_RETRIES + 1):
             try:
                 self.logger.info(
-                    f"[{company_name}] Uploading '{filename}' (attempt {attempt}/{UPLOAD_MAX_RETRIES})..."
+                    f"[{company_name}] Uploading '{filename}' "
+                    f"(attempt {attempt}/{UPLOAD_MAX_RETRIES})..."
                 )
 
                 with open(file_path, "rb") as f:
                     response = self.session.post(
                         API_UPLOAD_URL,
-                        files={"file": (filename, f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                        files={
+                            "file": (
+                                filename,
+                                f,
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            )
+                        },
                         data={
                             "company_name": company_name,
-                            "accord_code": accord_code,
+                            "uploader_name": "ace_automation",
+                            "upload_type": 0,
                         },
                         timeout=120,
                     )
@@ -112,7 +142,8 @@ class APIClient:
                 # Handle token expiration (401/403) → re-auth and retry
                 if response.status_code in (401, 403):
                     self.logger.warning(
-                        f"[{company_name}] Token expired (HTTP {response.status_code}). Re-authenticating..."
+                        f"[{company_name}] Token expired (HTTP {response.status_code}). "
+                        f"Re-authenticating..."
                     )
                     self.token = None
                     self.login()
@@ -136,7 +167,8 @@ class APIClient:
 
                 if attempt == UPLOAD_MAX_RETRIES:
                     raise RuntimeError(
-                        f"Upload failed for '{company_name}' after {UPLOAD_MAX_RETRIES} attempts"
+                        f"Upload failed for '{company_name}' after "
+                        f"{UPLOAD_MAX_RETRIES} attempts"
                     ) from e
 
                 time.sleep(UPLOAD_RETRY_DELAY)

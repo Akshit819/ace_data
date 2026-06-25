@@ -13,7 +13,7 @@ from datetime import datetime
 from config import CSV_FILE_PATH, TEMPLATE_FILE_PATH, OUTPUT_FOLDER_PATH
 from logger_setup import setup_logger
 from excel_automation import ExcelAutomation
-from api_client import APIClient
+# from api_client import APIClient  # TODO: Uncomment when ready for uploads
 
 
 def load_companies(csv_path: str, logger) -> pd.DataFrame:
@@ -91,14 +91,15 @@ def main():
 
     # ── Initialize Services ──────────────────────────
     excel = ExcelAutomation(main_logger)
-    api = APIClient(main_logger, error_logger)
-
-    # Authenticate once upfront
-    try:
-        api.login()
-    except Exception as e:
-        main_logger.critical(f"Initial authentication failed: {e}")
-        sys.exit(1)
+    # TODO: Uncomment when ready for uploads
+    # api = APIClient(main_logger, error_logger)
+    #
+    # # Authenticate once upfront
+    # try:
+    #     api.login()
+    # except Exception as e:
+    #     main_logger.critical(f"Initial authentication failed: {e}")
+    #     sys.exit(1)
 
     # Start Excel
     try:
@@ -136,25 +137,26 @@ def main():
             results["excel_fail"] += 1
             continue  # Skip to next company
 
-        # Step 2: Upload
-        try:
-            response = api.upload_file(output_file, company_name, accord_code)
-            main_logger.info(
-                f"[{company_name}] UPLOAD SUCCESS | Response: {response}"
-            )
-            results["success"] += 1
-        except Exception as e:
-            main_logger.error(f"[{company_name}] UPLOAD FAILED: {e}")
-            error_logger.error(
-                f"UPLOAD_FAIL | {company_name} | {accord_code} | File: {output_file} | {e}"
-            )
-            results["upload_fail"] += 1
-            # File was saved successfully, just upload failed
-            continue
+        # Step 2: Upload (disabled — testing Excel only)
+        # TODO: Uncomment when ready for uploads
+        # try:
+        #     response = api.upload_file(output_file, company_name, accord_code)
+        #     main_logger.info(
+        #         f"[{company_name}] UPLOAD SUCCESS | Response: {response}"
+        #     )
+        #     results["success"] += 1
+        # except Exception as e:
+        #     main_logger.error(f"[{company_name}] UPLOAD FAILED: {e}")
+        #     error_logger.error(
+        #         f"UPLOAD_FAIL | {company_name} | {accord_code} | File: {output_file} | {e}"
+        #     )
+        #     results["upload_fail"] += 1
+        #     continue
+        results["success"] += 1  # Count as success if Excel processing worked
 
     # ── Cleanup ──────────────────────────────────────
     excel.quit_excel()
-    api.close()
+    # api.close()  # TODO: Uncomment when ready for uploads
 
     # ── Summary ──────────────────────────────────────
     end_time = datetime.now()
