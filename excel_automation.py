@@ -115,6 +115,11 @@ class ExcelAutomation:
         safe_name = self._sanitize_filename(company_name)
         output_path = os.path.join(OUTPUT_FOLDER_PATH, f"{safe_name}.xlsx")
 
+        # Skip processing if file already exists
+        if os.path.exists(output_path):
+            self.logger.info(f"[{company_name}] Output file already exists at {output_path}. Skipping Excel processing.")
+            return output_path
+
         # Create a temporary working copy of the template
         working_copy = os.path.join(OUTPUT_FOLDER_PATH, f"_working_{safe_name}.xlsx")
         shutil.copy2(TEMPLATE_FILE_PATH, working_copy)
