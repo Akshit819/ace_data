@@ -195,22 +195,47 @@ if __name__ == "__main__":
         client.login()
         print("\n✅ LOGIN SUCCESS!")
         
-        # 5. Test Upload
+        # 5. Upload all files in the output folder
         import os
-        test_file = os.path.join("output", "Muthoot Finance Ltd.xlsx")
+        output_dir = "output"
         
-        if not os.path.exists(test_file):
-            print(f"\n⚠️ Test file not found at {test_file}")
+        if not os.path.exists(output_dir):
+            print(f"\n⚠️ Output folder '{output_dir}' not found.")
             sys.exit(1)
             
-        print(f"\nTesting upload with: {test_file}")
-        # The accord_code doesn't matter for the upload request as it only sends company_name
-        result = client.upload_file(test_file, company_name="Muthoot Finance Ltd", accord_code="221790")
-        print("\n✅ UPLOAD SUCCESS!")
-        print(result)
+        files = [f for f in os.listdir(output_dir) if f.endswith(".xlsx") and not f.startswith("_working_")]
+        
+        if not files:
+            print(f"\n⚠️ No Excel files found in '{output_dir}'.")
+            sys.exit(0)
+            
+        print(f"\nFound {len(files)} files to upload. Starting batch upload...")
+        
+        success_count = 0
+        fail_count = 0
+        
+        for filename in files:
+            file_path = os.path.join(output_dir, filename)
+            company_name = filename.replace(".xlsx", "")
+            
+            print(f"\nUploading: {company_name}")
+            try:
+                # The accord_code doesn't matter for the upload request as it only sends company_name
+                client.upload_file(file_path, company_name=company_name, accord_code="000000")
+                print(f"✅ SUCCESS: {company_name}")
+                success_count += 1
+            except Exception as upload_e:
+                print(f"❌ FAILED: {company_name} - {upload_e}")
+                fail_count += 1
+                
+        print("\n" + "="*50)
+        print(f"BATCH UPLOAD COMPLETE")
+        print(f"Successful: {success_count}")
+        print(f"Failed: {fail_count}")
+        print("="*50)
 
     except Exception as e:
-        print(f"\n❌ FAILED: {e}")
+        print(f"\n❌ SCRIPT FAILED: {e}")
         sys.exit(1)
     finally:
         client.close()
